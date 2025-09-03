@@ -8,7 +8,7 @@ Basic usage:
 // create thread pool with 4 worker threads
 MashPool pool{ 4 };
 
-// calculate sum of the first 100 positive integers in parallel
+// calculate sum of the first 100 positive integers, in parallel
 std::atomic_int sum = 0;
 for (int i = 1; i <= 100; ++i)
 {
@@ -22,6 +22,7 @@ for (int i = 1; i <= 100; ++i)
 // wait for all of the tasks to be executed
 pool.wait();
 
+// print sum (5050)
 std::cout << "sum: " << sum << std::endl;
 ```
 Or with futures:
@@ -30,8 +31,8 @@ Or with futures:
 MashPool pool;
 
 // queue task and store future
-auto result = pool.addTaskFuture([](int answer) { return answer; }, 0x4D);
+auto result = pool.addTaskFuture([](int n) { return n * n; }, 10);
 
-// get result from future
+// print result from future (100)
 std::cout << "future result: " << result.get() << std::endl;
 ```
