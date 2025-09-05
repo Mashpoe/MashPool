@@ -3,6 +3,8 @@ MashPool
 
 A simple C++ thread pool implementation, forked from <https://github.com/progschj/ThreadPool>.
 
+This fork introduces new features along with some slight performance improvements. It has been updated to work in modern C++, but it unfortunately requires C++23 or later.
+
 Basic usage:
 ```cpp
 // create thread pool with 4 worker threads
@@ -25,7 +27,28 @@ pool.wait();
 // print sum (5050)
 std::cout << "sum: " << sum << std::endl;
 ```
-Or with futures:
+Passing additional function arguments:
+```cpp
+// function with some parameters
+void task(std::atomic_int& sum, int n) { sum += n; }
+
+// ...
+
+MashPool pool{ 4 };
+
+std::atomic_int sum = 0;
+for (int i = 1; i <= 100; ++i)
+{
+	// be sure to use std::ref() or std::cref() when passing an argument by reference
+	pool.addTask(task, std::ref(sum), i);
+}
+
+pool.wait();
+
+// print sum (5050)
+std::cout << "sum: " << sum << std::endl;
+```
+Usage with futures:
 ```cpp
 // create a pool with "std::thread::hardware_concurrency()" threads
 MashPool pool;
