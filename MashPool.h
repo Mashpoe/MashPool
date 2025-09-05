@@ -18,7 +18,11 @@ public:
 	// joins all worker threads
 	~MashPool();
 
-	void addTask(std::function<void()> task);
+	template<class F>
+	void addTask(F&& f);
+
+	template<class F, class... Args>
+	void addTask(F&& f, Args&&... args);
 
 	template<class F, class... Args>
 	auto addTaskFuture(F&& f, Args&&... args)
@@ -31,7 +35,7 @@ private:
 
 	std::vector<std::thread> workers;
 
-	std::queue<std::function<void()>> tasks;
+	std::queue<std::move_only_function<void()>> tasks;
 	std::atomic_uint taskCount;
 
 	// synchronization
@@ -50,7 +54,7 @@ inline MashPool::MashPool(size_t threadCount)
 			{
 				for (;;)
 				{
-					std::function<void()> task;
+					std::move_only_function<void()> task;
 
 					{
 						std::unique_lock<std::mutex> lock{ this->queueMutex };
@@ -93,7 +97,8 @@ inline MashPool::~MashPool()
 	}
 }
 
-inline void MashPool::addTask(std::function<void()> task)
+template<class F>
+inline void MashPool::addTask(F&& f)
 {
 	// increment "taskCount" before doing anything
 	++taskCount;
@@ -104,7 +109,24 @@ inline void MashPool::addTask(std::function<void()> task)
 		// don't allow enqueueing after stopping the pool
 		assert(!stop);
 
-		tasks.emplace(task);
+		tasks.emplace(std::move(f));
+	}
+	condition.notify_one();
+}
+
+template<class F, class... Args>
+void MashPool::addTask(F&& f, Args&&... args)
+{
+	// increment "taskCount" before doing anything
+	++taskCount;
+
+	{
+		std::scoped_lock lock{ queueMutex };
+
+		// don't allow enqueueing after stopping the pool
+		assert(!stop);
+
+		tasks.emplace(std::bind(std::forward<F>(f), std::forward<Args>(args)...));
 	}
 	condition.notify_one();
 }
@@ -118,15 +140,18 @@ auto MashPool::addTaskFuture(F&& f, Args&&... args)
 
 	using return_type = std::invoke_result_t<F, Args...>;
 
-	// this has to be a shared pointer because an std::function cannot be created from a lambda that captures a non copy-constructible type.
-	// the only way to fix this would be to create a custom std::function.
-	auto task = std::make_shared<std::packaged_task<return_type()>>(std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+	// the packaged_task is created on the heap with std::make_unique(),
+	// and the resulting unique_ptr is moved to the capture list of a lambda which the packaged_task is then called from,
+	// which is apparently faster than just creating the packaged_task on the stack and then calling tasks.emplace(std::move(packaged_task)).
+	auto task = std::make_unique<std::packaged_task<return_type()>>(
+		std::bind(std::forward<F>(f), std::forward<Args>(args)...)
+	);
 
 	std::future<return_type> res = task->get_future();
 	{
-		std::scoped_lock lock{ queueMutex };
+		std::scoped_lock<std::mutex> lock{ queueMutex };
 
-		// don't allow enqueueing after stopping the pool
+		// don't allow tasks to be queued when the pool has been stopped
 		assert(!stop);
 
 		tasks.emplace([task = std::move(task)]() { (*task)(); });
